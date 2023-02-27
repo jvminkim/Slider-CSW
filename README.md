@@ -8,7 +8,7 @@ Shapley Interaction between plate_x and plate_z :
 ![SHAP Interaction between plate_x and plate_z](https://user-images.githubusercontent.com/98504190/221609909-c463ecf7-cfa0-4eed-ac07-9ea747c4efbf.png)
 
 CSW Violin Plot :
-![CSW Violin Plot](https://user-images.githubusercontent.com/98504190/221611392-a1ec9836-e036-4ed8-b247-b0b8db75b758.png)
+![CSW Violin Plot](https://user-images.githubusercontent.com/98504190/221616190-ae8d5b4e-ee05-4491-a542-a27d72119b99.png)
 
 xCSW Violin Plot :
 ![xCSW Violin Plot](https://user-images.githubusercontent.com/98504190/221611524-2c919f14-dcbc-488d-a7c6-d66a5915eef5.png)
