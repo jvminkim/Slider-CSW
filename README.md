@@ -1,4 +1,7 @@
 # Slider-CSW
+I wrote an article diving deeper into sliders to look at how machine learning models evaluated the new trend of sweeping sliders. From the visualizations as well as the article, you can see that the machine learning model preferred the sweeping slider and predicted it to have a higher CSW than the regular slider. 
+
+[Here's](https://medium.com/@jaminkim0504/looking-into-slider-csw-b663d41b7b09) a link to the full article.
 
 My Visualizations for this project :
 Shapley Plot of Feature Importances:
