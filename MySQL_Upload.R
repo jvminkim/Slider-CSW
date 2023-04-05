@@ -46,6 +46,12 @@ all_2022 = bbd::statcast(start = "2022-04-07",
                          names = TRUE,
                          verbose = TRUE)
 
+all_2023 = bbd::statcast(start = "2023-03-22",
+                         end = "2023-03-24",
+                         process = TRUE,
+                         names = TRUE,
+                         verbose = TRUE)
+
 
 all_dat <- rbind(all_2017, all_2018, all_2019, all_2020, all_2021, all_2022)
 

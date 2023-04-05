@@ -11,7 +11,8 @@ library(pdp)
 library(SHAPforxgboost)
 library(iml)
 library(pdp)
-library(xgboostExplainer)
+library(splitTools)
+library(tidymodels)
 
 #Getting pitches from MySQL Server
 #############################################################################################################################################################
@@ -21,7 +22,7 @@ conn <- dbConnect(MySQL(), dbname = "Statcast",
 
 query <- "
 SELECT pitcher_name, game_date, release_speed, release_pos_x, release_pos_y, release_pos_z,
-description, pfx_x, pfx_z, plate_x, plate_z, pitch_type, balls, strikes
+description, pfx_x, pfx_z, plate_x, plate_z, release_spin_rate, release_extension, pitch_type, balls, strikes
 FROM pitches
 "
 
@@ -72,7 +73,9 @@ pitcher_csw <- all_pitches %>%
          arm_slot = ifelse(angle >= 0 & angle < 30 , "Overhand", ifelse(
            angle >= 30 & angle < 70, "Three-Quarters", ifelse(
              angle >= 70 & angle <= 90, "Sidearm", ifelse(angle > 90, "Submarine", "Invalid")))),
-         called_strike_whiff = ifelse(description == "called_strike", 1, ifelse(description == "swinging_strike" , 1 , 0))) %>%
+         called_strike_whiff = ifelse(description == "called_strike", "called_strike", ifelse(
+           description == "swinging_strike", "swinging_strike", "neither"
+         ))) %>%
   unique()
 
 rm(all_pitches)
@@ -141,7 +144,8 @@ breakingball_peripherals <- pitcher_csw %>%
            sum((release_pos_z - avg_release_z)^2)/pitch_type_totals, 
          avg_bb_release_x = mean(release_pos_x),
          avg_bb_release_y = mean(release_pos_y),
-         avg_bb_release_z = mean(release_pos_z)) 
+         avg_bb_release_z = mean(release_pos_z)) %>%
+  left_join(offspeed_difference_peripherals, by = c("pitcher_name", "year", "pitch_type"))
   #select(pitcher_name, pitch_type, year, avg_bb_release_x, avg_bb_release_y, avg_bb_release_z, bb_release_variance)
 
 
@@ -151,38 +155,97 @@ gc()
 
 ###########################################################################################################################################################
 
-sl_pitches <- sl_pitches %>%
-  mutate(release_pos_x = ifelse(release_pos_x > 0, release_pos_x * -1, 0))
+sl_pitches <- breakingball_peripherals %>%
+  mutate(release_pos_x = ifelse(release_pos_x > 0, release_pos_x * -1, 0)) %>%
+  mutate(bauer_unit = release_spin_rate/release_speed) %>%
+  ungroup()
 
+sl_pitches$ba
+
+set.seed(32)
+
+player_groups <- splitTools::partition(
+  sl_pitches$pitcher_name,
+  p = c(train = .7, test = .3),
+  type = "grouped"
+)
+
+sl_train <- sl_pitches[player_groups$train, ]
+sl_test <- sl_pitches[player_groups$test, ]
+
+sl_train <- as.matrix(sl_train)
+sl_train$bauer_unit <- as.numeric(sl_train$bauer_unit)
 
 #Sliders
-set.seed(42)
 
-  sl_smp_size <- floor(.7 * nrow(sl_pitches))
-  sl_train_indexes <- sample(seq_len(nrow(sl_pitches)), size = sl_smp_size)
-  sl_train <- sl_pitches[sl_train_indexes,]
-  sl_test <- head(sl_pitches[-sl_train_indexes,], sl_smp_size)
+  recipe_sl <- recipe(called_strike_whiff ~ bauer_unit  + pfx_x, pfx_z + plate_x + plate_z + 
+                      balls + strikes + velocity_difference + vmov_difference + hmov_difference + 
+                        release_extension + angle + bb_release_variance, data = sl_train)
+  
+  recipe_sl %>%
+    prep() %>%
+    juice()
+  
+  #RF and XGBoost Models
+  
+  xgb_model <- boost_tree(
+    trees = tune(),
+    min_n = tune(),
+    tree_depth = tune()
+    
+  ) %>%
+    set_engine("xgboost") %>%
+    set_mode("classification")
+  
+  xgb_gridSearch <- grid_latin_hypercube(
+   
+    trees(),
+    min_n(),
+    tree_depth(),
+    size = 50
+  )
+  
+  xgb_wf <- workflow() %>%
+    add_recipe(recipe_sl) %>%
+    add_model(xgb_model)
+  
+  xgb_tune <- tune_grid (
+    xgb_wf,
+    resamples = vfold_cv(sl_train, 5),
+    grid = xgb_gridSearch,
+    metrics = metric_set(mn_log_loss)
+  )
+  
+  
+  
   
   sl_train_components <- sl_train %>%
     ungroup() %>%
-    dplyr::select(called_strike_whiff, release_speed, pfx_x, pfx_z, plate_x, plate_z,
-                  balls, strikes, velocity_difference, vmov_difference, hmov_difference,
-                  angle, bb_release_variance)
+    dplyr::select(called_strike, whiff, neither, release_speed, pfx_x, pfx_z, plate_x, plate_z,
+                  balls, strikes, velocity_difference, vmov_difference, hmov_difference, 
+                  release_spin_rate, release_extension, angle, bb_release_variance)
   
   sl_test_components <- sl_test %>%
     ungroup() %>%
-    dplyr::select(called_strike_whiff, release_speed, pfx_x, pfx_z, plate_x, plate_z,
-                  balls, strikes, velocity_difference, vmov_difference, hmov_difference,
-                  angle, bb_release_variance)
+    dplyr::select(called_strike, whiff, neither, release_speed, pfx_x, pfx_z, plate_x, plate_z,
+                  balls, strikes, velocity_difference, vmov_difference, hmov_difference, 
+                  release_spin_rate, release_extension, angle, bb_release_variance)
+  
+  sl_val_components <- sl_valid %>%
+    ungroup() %>%
+    dplyr::select(called_strike, whiff, neither, release_speed, pfx_x, pfx_z, plate_x, plate_z,
+                  balls, strikes, velocity_difference, vmov_difference, hmov_difference, 
+                  release_spin_rate, release_extension, angle, bb_release_variance)
   
   sl_full_components <- sl_pitches %>%
     ungroup() %>%
-    dplyr::select(called_strike_whiff, release_speed, pfx_x, pfx_z, plate_x, plate_z,
-                  balls, strikes, velocity_difference, vmov_difference, hmov_difference,
-                  angle, bb_release_variance)
+    dplyr::select(called_strike, whiff, neither, release_speed, pfx_x, pfx_z, plate_x, plate_z,
+                  balls, strikes, velocity_difference, vmov_difference, hmov_difference, 
+                  release_spin_rate, release_extension, angle, bb_release_variance)
     
-  
+
   sl_xgb_train = xgb.DMatrix(data = as.matrix(sl_train_components[,-1]), label = sl_train_components$called_strike_whiff)
+  sl_xgb_val = xgb.DMatrix(data = as.matrix(sl_val_components[,-1]), label = sl_val_components$called_strike_whiff)
   sl_xgb_test = xgb.DMatrix(data = as.matrix(sl_test_components[,-1]), label = sl_test_components$called_strike_whiff)
   
   sl_xgb_total = xgb.DMatrix(data = as.matrix(sl_full_components[,-1]), label = sl_full_components$called_strike_whiff)
